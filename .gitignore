@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 
 # Virtual Environment (если используете)
-venv/
+.venv/
 env/
 
 # Mac OS system files
