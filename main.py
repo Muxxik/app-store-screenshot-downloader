@@ -21,8 +21,36 @@ def get_json_data(query, country):
 
 def get_high_res_url(url):
     """Попытка улучшить качество изображения через URL"""
-    new_url = re.sub(r'/[0-9]+x[0-9]+[^/]*', '/1284x2778bb', url)
-    return new_url
+    if re.search(r'/[0-9]+x[0-9]+', url):
+        # URL уже содержит размер — заменяем на высокое разрешение
+        return re.sub(r'/[0-9]+x[0-9]+[^/]*', '/1284x2778bb.jpg', url)
+    # URL без размера (из JSON-LD) — добавляем суффикс
+    return url + '/1284x2778bb.jpg'
+
+def get_base_image_path(url: str) -> str:
+    """Извлекает базовый путь изображения без суффикса размера Apple CDN.
+
+    Пример: .../filename.png/300x650bb-75.webp -> .../filename.png
+    """
+    parts = url.rsplit('/', 1)
+    if len(parts) == 2 and re.search(r'\d+x\d+', parts[1]):
+        return parts[0]
+    return url
+
+def is_screenshot_url(url: str) -> bool:
+    """Проверяет, похожа ли ссылка на скриншот (а не на иконку/баннер/плейсхолдер)"""
+    skip_patterns = [
+        'AppIcon', 'favicon', 'Placeholder', 'Features',
+        'marketing', 'PurpleVideo', '{w}x{h}',
+    ]
+    if any(p in url for p in skip_patterns):
+        return False
+    # Базовый путь (без суффикса размера) должен заканчиваться на расширение картинки,
+    # иначе это видео-превью или другой мусор (напр. хэш-URL без оригинального файла)
+    base = get_base_image_path(url)
+    if not re.search(r'\.(png|jpg|jpeg|webp)$', base, re.IGNORECASE):
+        return False
+    return True
 
 def parse_web_page(url):
     """Парсинг сайта (возвращает список в том порядке, как они в коде страницы)"""
@@ -32,9 +60,11 @@ def parse_web_page(url):
     }
     try:
         html = requests.get(url, headers=headers).text
-        # Ищем картинки. re.findall возвращает список В ПОРЯДКЕ их нахождения в тексте
-        links = re.findall(r'https://is[0-9]-ssl\.mzstatic\.com/image/thumb/[^"]+\.(?:jpg|png|webp)', html)
-        return links 
+        # Ищем картинки. [^\s"]+ — не захватываем пробелы (srcset) и кавычки
+        links = re.findall(r'https://is[0-9]-ssl\.mzstatic\.com/image/thumb/[^\s"]+\.(?:jpg|png|webp)', html)
+        # Оставляем только скриншоты
+        links = [u for u in links if is_screenshot_url(u)]
+        return links
     except Exception as e:
         print(f"Ошибка сайта: {e}")
         return []
@@ -62,7 +92,7 @@ def download_images(urls, folder_name):
             if len(r.content) < MIN_FILE_SIZE:
                 continue
             
-            if 'AppIcon' in url or 'favicon' in url:
+            if not is_screenshot_url(url):
                 continue
 
             ext = "jpg"
@@ -128,13 +158,14 @@ if __name__ == "__main__":
                 raw_urls.extend(web_links)
             
         # 3. УДАЛЕНИЕ ДУБЛИКАТОВ С СОХРАНЕНИЕМ ПОРЯДКА
-        # Мы не используем set(), потому что он перемешивает данные.
-        # Мы используем цикл с проверкой seen.
-        seen = set()
+        # Дедупликация по базовому пути (без суффикса размера),
+        # чтобы одна картинка в разных размерах из srcset не дублировалась.
+        seen_bases = set()
         ordered_unique_urls = []
         for url in raw_urls:
-            if url not in seen:
+            base = get_base_image_path(url)
+            if base not in seen_bases:
                 ordered_unique_urls.append(url)
-                seen.add(url)
+                seen_bases.add(base)
         
         download_images(ordered_unique_urls, full_folder_name)
