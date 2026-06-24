@@ -301,16 +301,43 @@ def download_videos(urls: list[str], folder_name: str) -> None:
     print(f"--- Видео скачано: {saved}\n")
 
 
-def process_appstore(query: str, country: str) -> None:
-    """Полный пайплайн для App Store."""
+def _clean_name(name: str) -> str:
+    """Имя для файловой системы: буквы/цифры/._- , пробелы -> '_'."""
+    return "".join(
+        x for x in (name or 'App') if x.isalnum() or x in "._- "
+    ).replace(" ", "_")
+
+
+def us_appstore_name(query: str) -> str | None:
+    """Каноническое имя приложения из US App Store.
+
+    Используется, чтобы папки одной игры назывались одинаково во всех локалях
+    (и в обоих магазинах), а не локализованным именем витрины каждой страны.
+    Возвращает уже очищенное под файловую систему имя или None.
+    """
+    data = get_appstore_data(query, 'us')
+    if data and data.get('trackName'):
+        return _clean_name(data['trackName'])
+    return None
+
+
+def process_appstore(query: str, country: str, folder_name: str | None = None) -> None:
+    """Полный пайплайн для App Store.
+
+    Имя папки: по умолчанию берётся каноническое US-имя приложения (одно и то же
+    для всех локалей). Можно передать готовое имя через folder_name (например,
+    US-имя из App Store, чтобы и Google Play-папки назывались так же).
+    """
     data = get_appstore_data(query, country)
     if not data:
         print(f"[!] Приложение не найдено в App Store ({country.upper()}).")
         return
 
-    clean_name = "".join(
-        x for x in data.get('trackName', 'App') if x.isalnum() or x in "._- "
-    ).replace(" ", "_")
+    if folder_name:
+        clean_name = folder_name
+    else:
+        us = get_appstore_data(query, 'us')
+        clean_name = _clean_name((us or data).get('trackName', 'App'))
     folder = f"{clean_name}_{country}_appstore"
 
     print(f"\nЦель: {clean_name} ({country.upper()}) -> Папка: {folder}")
@@ -415,17 +442,24 @@ def get_gplay_data(query: str, country: str) -> dict | None:
         return None
 
 
-def process_gplay(query: str, country: str) -> None:
-    """Полный пайплайн для Google Play."""
+def process_gplay(query: str, country: str, folder_name: str | None = None) -> None:
+    """Полный пайплайн для Google Play.
+
+    Имя папки: по умолчанию берётся US-имя приложения из Google Play (одно и то же
+    для всех локалей). Можно передать готовое имя через folder_name — например,
+    каноническое US-имя из App Store, чтобы папки игры назывались одинаково
+    в обоих магазинах.
+    """
     data = get_gplay_data(query, country)
     if not data:
         print(f"[!] Приложение не найдено в Google Play ({country.upper()}).")
         return
 
-    title = data.get('title', 'App')
-    clean_name = "".join(
-        x for x in title if x.isalnum() or x in "._- "
-    ).replace(" ", "_")
+    if folder_name:
+        clean_name = folder_name
+    else:
+        us = get_gplay_data(query, 'us')
+        clean_name = _clean_name((us or data).get('title', 'App'))
     folder = f"{clean_name}_{country}_gplay"
 
     print(f"\nЦель: {clean_name} ({country.upper()}) -> Папка: {folder}")
